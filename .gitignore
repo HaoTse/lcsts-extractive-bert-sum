@@ -102,3 +102,11 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# data folder symbolic link
+data
+
+# result folder
+token_result/*
+oracle_result/*
+

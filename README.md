@@ -1,1 +1,1 @@
-# lcsts-extractive-bert-sum
+# LCSTS BertSUM
