@@ -109,4 +109,4 @@ data
 # result folder
 token_result/*
 oracle_result/*
-
+models/*
