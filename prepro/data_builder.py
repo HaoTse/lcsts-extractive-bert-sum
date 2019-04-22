@@ -143,6 +143,9 @@ class BertData():
         if (len(labels) == 0):
             logger.info(f'(labels = 0) Remove ({src}, {tgt}).')
             return None
+        if (sum(labels) == 0):
+            logger.info(f'(all label = 0) Remove ({src}, {tgt}).')
+            return None
 
         src_txt = [' '.join(sent) for sent in src]
         # text = [' '.join(ex['src_txt'][i].split()[:self.args.max_src_ntokens]) for i in idxs]
