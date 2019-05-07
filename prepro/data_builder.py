@@ -209,16 +209,15 @@ def format_to_bert(args, result):
         if args.save_temp:
             path_dir = 'oracle_result'
             os.makedirs(path_dir, exist_ok=True)
-            for dataset in args.dataset:
-                with open(os.path.join(path_dir, f'{dataset}_src.oracle'), 'w', encoding='utf-8') as f:
-                    for line in pt_result:
-                        f.write(' '.join(line['src_txt']) + '\n')
-                with open(os.path.join(path_dir, f'{dataset}_tgt.oracle'), 'w', encoding='utf-8') as f:
-                    for line in pt_result:
-                        f.write(line['tgt_txt'] + '\n')
-                with open(os.path.join(path_dir, f'{dataset}_lab.oracle'), 'w', encoding='utf-8') as f:
-                    for line in pt_result:
-                        f.write(' '.join(str(line['labels'])) + '\n')
+            with open(os.path.join(path_dir, f'{corpus_type}_src.oracle'), 'w', encoding='utf-8') as f:
+                for line in pt_result:
+                    f.write(' '.join(line['src_txt']) + '\n')
+            with open(os.path.join(path_dir, f'{corpus_type}_tgt.oracle'), 'w', encoding='utf-8') as f:
+                for line in pt_result:
+                    f.write(line['tgt_txt'] + '\n')
+            with open(os.path.join(path_dir, f'{corpus_type}_lab.oracle'), 'w', encoding='utf-8') as f:
+                for line in pt_result:
+                    f.write(' '.join(str(line['labels'])) + '\n')
             print(f'Successfully saved results to {path_dir}')
 
     print("Successfully finished formating.\n")
