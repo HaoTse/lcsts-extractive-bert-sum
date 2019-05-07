@@ -167,7 +167,7 @@ def baseline(args):
 
     # output results
     logger.info(f"Store the oracle result...")
-    path_dir = os.path.join(args.result_path, args.mode)
+    path_dir = args.result_path
     os.makedirs(path_dir, exist_ok=True)
     with open(os.path.join(path_dir, 'targets.txt'), 'w', encoding='utf-8') as f:
         f.write('\n'.join(refs))
@@ -208,7 +208,7 @@ def train(args):
     num_train_optimization_steps = None
 
     print('[Train] Load data pt file...')
-    train_examples = torch.load(os.path.join(args.bert_data_path, 'LCSTS_train.pt'))
+    train_examples = torch.load(args.train_data)
     num_train_optimization_steps = int(
         len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
     if args.local_rank != -1:
@@ -275,8 +275,7 @@ def train(args):
 
     # prepare evaluation data
     eval_dataloader = None
-    # eval_path = os.path.join(args.bert_data_path, f'LCSTS_valid.pt')
-    eval_path = os.path.join(args.bert_data_path, f'LCSTS_test.pt')
+    eval_path = args.test_data
     if os.path.isfile(eval_path):
         logger.info(f"***** Prepare evaluation data from {eval_path} *****")
 
@@ -298,7 +297,6 @@ def train(args):
     output_model_file = os.path.join(args.model_path, WEIGHTS_NAME)
     output_config_file = os.path.join(args.model_path, CONFIG_NAME)
     # begin training
-    best_refs, best_preds = None, None
     for epoch_i in range(int(args.num_train_epochs)):
         print('[ Epoch', epoch_i, ']')
         
@@ -343,7 +341,6 @@ def train(args):
         cur_loss = train_loss
 
         # evaluation
-        refs, preds = [], []
         if eval_dataloader and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
             model.eval()
 
@@ -369,10 +366,7 @@ def train(args):
                 mask = mask.detach().cpu().numpy()
                 label_ids = label_ids.to('cpu').numpy()
                 # find selected sentences
-                eval_examples = torch.load(eval_path)
                 _pred, _ref, selected_ids = select_sent(sent_idx, eval_examples, sent_scores, mask)
-                preds.extend(_pred)
-                refs.extend(_ref)
                 tmp_eval_accuracy = accuracy(selected_ids, label_ids, mask)
 
                 eval_loss += tmp_eval_loss.mean().item()
@@ -385,8 +379,6 @@ def train(args):
             eval_accuracy = eval_accuracy / nb_eval_examples
             cur_loss = eval_loss
             
-            
-        
         # output result of an epoch
         print(f'  - (Training)   loss: {train_loss: 8.5f}')
         print(f'  - (Validation) loss: {eval_loss: 8.5f}, accuracy: {100 * eval_accuracy: 3.3f} %')
@@ -395,27 +387,12 @@ def train(args):
         if cur_loss < best_performance:
             best_performance = cur_loss
             best_epoch = epoch_i
-            if len(refs) != 0 and len(preds) != 0:
-                best_refs = refs
-                best_preds = preds
             # Save a trained model and the associated configuration
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             torch.save(model_to_save.state_dict(), output_model_file)
             with open(output_config_file, 'w') as f:
                 f.write(model_to_save.config.to_json_string())
             logger.info("Successfully save the best model.")
-
-    # output results
-    if best_preds and best_refs:
-        logger.info(f"Store the validation result of epoch {best_epoch}...")
-        path_dir = os.path.join(args.result_path, args.mode)
-        os.makedirs(path_dir, exist_ok=True)
-        with open(os.path.join(path_dir, 'targets.txt'), 'w', encoding='utf-8') as f:
-            f.write('\n'.join(best_refs))
-        with open(os.path.join(path_dir, 'preds.txt'), 'w', encoding='utf-8') as f:
-            f.write('\n'.join(best_preds))
-
-        compute_files_ROUGE(args, os.path.join(path_dir, 'targets.txt'), os.path.join(path_dir, 'preds.txt'))
 
 
 def test(args):
@@ -464,7 +441,7 @@ def test(args):
 
     # prepare testing data
     eval_dataloader = None
-    eval_path = os.path.join(args.bert_data_path, f'LCSTS_test.pt')
+    eval_path = args.test_data
     logger.info(f"***** Prepare testing data from {eval_path} *****")
 
     eval_examples = torch.load(eval_path)
@@ -504,7 +481,6 @@ def test(args):
             mask = mask.detach().cpu().numpy()
             label_ids = label_ids.to('cpu').numpy()
             # find selected sentences
-            eval_examples = torch.load(eval_path)
             _pred, _ref, selected_ids = select_sent(sent_idx, eval_examples, sent_scores, mask)
             preds.extend(_pred)
             refs.extend(_ref)
@@ -523,7 +499,7 @@ def test(args):
         print(f'  - (Testing) loss: {eval_loss: 8.5f}, accuracy: {100 * eval_accuracy: 3.3f} %')
 
     # output results
-    path_dir = os.path.join(args.result_path, args.mode)
+    path_dir = args.result_path
     os.makedirs(path_dir, exist_ok=True)
     with open(os.path.join(path_dir, 'targets.txt'), 'w', encoding='utf-8') as f:
         f.write('\n'.join(refs))
@@ -537,10 +513,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--mode", default='train', type=str, choices=['train', 'test', 'oracle'])
-    parser.add_argument("--bert_data_path", default='bert_data/')
+    parser.add_argument("--train_data", default='bert_data/LCSTS_train.pt')
+    parser.add_argument("--test_data", default='bert_data/LCSTS_test.pt')
     # parser.add_argument("--model_path", default='models/')
     parser.add_argument("--model_path", default='models/small/')
-    parser.add_argument("--result_path", default='results/')
+    parser.add_argument("--result_path", default='results/train/')
 
     parser.add_argument("--bert_model", default='bert-base-chinese', type=str,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
@@ -616,10 +593,10 @@ if __name__ == "__main__":
         ptvsd.wait_for_attach()
     
     # create result folder
-    if os.path.exists(os.path.join(args.result_path, args.mode)) and os.listdir(os.path.join(args.result_path, args.mode)) and args.mode != 'train':
-        raise ValueError("Output directory ({}) already exists and is not empty.".format(os.path.join(args.result_path, args.mode)))
-    if not os.path.exists(os.path.join(args.result_path, args.mode)) and args.mode != 'train':
-        os.makedirs(os.path.join(args.result_path, args.mode))
+    if os.path.exists(args.result_path) and os.listdir(args.result_path) and args.mode != 'train':
+        raise ValueError("Output directory ({}) already exists and is not empty.".format(args.result_path))
+    if not os.path.exists(args.result_path) and args.mode != 'train':
+        os.makedirs(args.result_path)
     # create model folder
     if os.path.exists(args.model_path) and os.listdir(args.model_path) and args.mode == 'train':
         raise ValueError("Output directory ({}) already exists and is not empty.".format(args.model_path))

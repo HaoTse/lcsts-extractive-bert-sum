@@ -28,7 +28,7 @@ def compute_files_ROUGE(args, ref_dir, pred_dir):
     ))
 
     # output to files
-    with open(os.path.join(args.result_path, args.mode, 'rouge.txt'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(args.result_path, 'rouge.txt'), 'w', encoding='utf-8') as f:
         f.write("ROUGE-F(1/2/l): {:.2f}/{:.2f}/{:.2f}\nROUGE-R(1/2/l): {:.2f}/{:.2f}/{:.2f}\n".format(
             rouge_score["rouge-1"]["f"] * 100,
             rouge_score["rouge-2"]["f"] * 100,
