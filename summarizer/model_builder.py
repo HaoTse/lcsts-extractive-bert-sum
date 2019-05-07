@@ -45,7 +45,7 @@ class Summarizer(nn.Module):
                     xavier_uniform_(p)
 
     def load_cp(self, pt):
-        self.load_state_dict(pt['model'], strict=True)
+        self.load_state_dict(pt, strict=True)
 
     def forward(self, x, segs, clss, mask, mask_cls, sentence_range=None):
 

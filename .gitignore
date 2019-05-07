@@ -105,6 +105,7 @@ venv.bak/
 
 # data folder symbolic link
 data
+small_data
 
 # result folder
 token_result/*

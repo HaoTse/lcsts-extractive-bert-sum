@@ -279,9 +279,12 @@ def train(args):
     eval_path = os.path.join(args.bert_data_path, f'LCSTS_test.pt')
     if os.path.isfile(eval_path):
         logger.info(f"***** Prepare evaluation data from {eval_path} *****")
+
         eval_examples = torch.load(eval_path)
         eval_features = convert_examples_to_features(eval_examples)
         eval_data = get_dataset(eval_features)
+        
+        logger.info("  Num examples = %d", len(eval_examples))
         # Run prediction for full data
         eval_sampler = SequentialSampler(eval_data)
         eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
@@ -415,12 +418,128 @@ def train(args):
         compute_files_ROUGE(args, os.path.join(path_dir, 'targets.txt'), os.path.join(path_dir, 'preds.txt'))
 
 
+def test(args):
+    # initial device and gpu number
+    if args.local_rank == -1 or args.no_cuda:
+        device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+        n_gpu = torch.cuda.device_count()
+    else:
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device("cuda", args.local_rank)
+        n_gpu = 1
+        # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+        torch.distributed.init_process_group(backend='nccl')
+    logger.info("device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
+        device, n_gpu, bool(args.local_rank != -1), args.fp16))
+
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
+                            args.gradient_accumulation_steps))
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if n_gpu > 0:
+        torch.cuda.manual_seed_all(args.seed)
+
+    model_file = os.path.join(args.model_path, WEIGHTS_NAME)
+    config_file = os.path.join(args.model_path, CONFIG_NAME)
+    # Prepare model
+    print('[Test] Load model...')
+    config = BertConfig.from_json_file(config_file)
+    model = Summarizer(args, device, load_pretrained_bert=False, bert_config=config)
+    if args.fp16:
+        model.half()
+    model.to(device)
+    if args.local_rank != -1:
+        try:
+            from apex.parallel import DistributedDataParallel as DDP
+        except ImportError:
+            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+
+        model = DDP(model)
+    elif n_gpu > 1:
+        model = torch.nn.DataParallel(model)
+    model.load_cp(torch.load(model_file))
+
+    # prepare testing data
+    eval_dataloader = None
+    eval_path = os.path.join(args.bert_data_path, f'LCSTS_test.pt')
+    logger.info(f"***** Prepare testing data from {eval_path} *****")
+
+    eval_examples = torch.load(eval_path)
+    eval_features = convert_examples_to_features(eval_examples)
+    eval_data = get_dataset(eval_features)
+    
+    logger.info("  Num examples = %d", len(eval_examples))
+    # Run prediction for full data
+    eval_sampler = SequentialSampler(eval_data)
+    eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
+
+    # testing
+    loss_f = torch.nn.BCELoss(reduction='none')
+    refs, preds = [], []
+    if eval_dataloader and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+        model.eval()
+
+        eval_loss, eval_accuracy = 0, 0
+        nb_eval_steps, nb_eval_examples = 0, 0
+
+        for sent_idx, input_ids, input_mask, segment_ids, clss_ids, clss_mask, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
+            input_ids = input_ids.to(device)
+            input_mask = input_mask.to(device)
+            segment_ids = segment_ids.to(device)
+            clss_ids = clss_ids.to(device)
+            clss_mask = clss_mask.to(device)
+            label_ids = label_ids.to(device)
+
+            with torch.no_grad():
+                sent_scores, mask = model(input_ids, segment_ids, clss_ids, input_mask, clss_mask)
+
+                tmp_eval_loss = loss_f(sent_scores, label_ids.float())
+                tmp_eval_loss = (tmp_eval_loss * mask.float()).sum()
+                tmp_eval_loss = tmp_eval_loss/tmp_eval_loss.numel()
+
+            sent_scores = sent_scores.detach().cpu().numpy()
+            mask = mask.detach().cpu().numpy()
+            label_ids = label_ids.to('cpu').numpy()
+            # find selected sentences
+            eval_examples = torch.load(eval_path)
+            _pred, _ref, selected_ids = select_sent(sent_idx, eval_examples, sent_scores, mask)
+            preds.extend(_pred)
+            refs.extend(_ref)
+            tmp_eval_accuracy = accuracy(selected_ids, label_ids, mask)
+
+            eval_loss += tmp_eval_loss.mean().item()
+            eval_accuracy += tmp_eval_accuracy
+
+            nb_eval_examples += input_ids.size(0)
+            nb_eval_steps += 1
+
+        eval_loss = eval_loss / nb_eval_steps
+        eval_accuracy = eval_accuracy / nb_eval_examples
+            
+        # print result
+        print(f'  - (Testing) loss: {eval_loss: 8.5f}, accuracy: {100 * eval_accuracy: 3.3f} %')
+
+    # output results
+    path_dir = os.path.join(args.result_path, args.mode)
+    os.makedirs(path_dir, exist_ok=True)
+    with open(os.path.join(path_dir, 'targets.txt'), 'w', encoding='utf-8') as f:
+        f.write('\n'.join(refs))
+    with open(os.path.join(path_dir, 'preds.txt'), 'w', encoding='utf-8') as f:
+        f.write('\n'.join(preds))
+
+    compute_files_ROUGE(args, os.path.join(path_dir, 'targets.txt'), os.path.join(path_dir, 'preds.txt'))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--mode", default='train', type=str, choices=['train', 'validate', 'test', 'oracle'])
+    parser.add_argument("--mode", default='train', type=str, choices=['train', 'test', 'oracle'])
     parser.add_argument("--bert_data_path", default='bert_data/')
-    parser.add_argument("--model_path", default='models/')
+    # parser.add_argument("--model_path", default='models/')
+    parser.add_argument("--model_path", default='models/small/')
     parser.add_argument("--result_path", default='results/')
 
     parser.add_argument("--bert_model", default='bert-base-chinese', type=str,
@@ -512,3 +631,5 @@ if __name__ == "__main__":
         baseline(args)
     elif args.mode == 'train':
         train(args)
+    elif args.mode == 'test':
+        test(args)
