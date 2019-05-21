@@ -150,7 +150,7 @@ def baseline(args):
     """
     Compute the ROUGE score of oracle summaries.
     """
-    dataset = torch.load(os.path.join(args.bert_data_path, 'LCSTS_test.pt'))
+    dataset = torch.load(args.test_data)
     all_src = [f['src_txt'] for f in dataset]
     all_ref = [f['tgt_txt'] for f in dataset]
     all_label = [f['labels'] for f in dataset]
@@ -428,6 +428,8 @@ def test(args):
     if args.fp16:
         model.half()
     model.to(device)
+    # load check points
+    model.load_cp(torch.load(model_file))
     if args.local_rank != -1:
         try:
             from apex.parallel import DistributedDataParallel as DDP
@@ -437,7 +439,6 @@ def test(args):
         model = DDP(model)
     elif n_gpu > 1:
         model = torch.nn.DataParallel(model)
-    model.load_cp(torch.load(model_file))
 
     # prepare testing data
     eval_dataloader = None
