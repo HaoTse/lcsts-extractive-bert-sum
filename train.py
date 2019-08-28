@@ -217,7 +217,16 @@ def train(args):
 
     # Prepare model
     print('[Train] Initial model...')
-    model = Summarizer(args, device, load_pretrained_bert=True)
+    if args.bert_config:
+        model_file = os.path.join(args.bert_config, WEIGHTS_NAME)
+        config_file = os.path.join(args.bert_config, CONFIG_NAME)
+        print('[Test] Load model...')
+        config = BertConfig.from_json_file(config_file)
+        model = Summarizer(args, device, load_pretrained_bert=False, bert_config=config)
+        # load check points
+        model.load_cp(torch.load(model_file))
+    else:
+        model = Summarizer(args, device, load_pretrained_bert=True)
     if args.fp16:
         model.half()
     model.to(device)
@@ -524,6 +533,8 @@ if __name__ == "__main__":
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                         "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
                         "bert-base-multilingual-cased, bert-base-chinese.")
+    parser.add_argument("--bert_config", type=str,
+                        help="Bert config path.")
 
     parser.add_argument('--log_file', default='')
     parser.add_argument("--cache_dir",

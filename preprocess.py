@@ -32,7 +32,6 @@ if __name__ == "__main__":
     parser.add_argument("-test_src_path", default='small_data/test/short_text.txt')
     parser.add_argument("-test_tgt_path", default='small_data/test/summary.txt')
 
-    parser.add_argument("-shard_size", default=2000, type=int)
     parser.add_argument('-min_nsents', default=3, type=int)
     parser.add_argument('-max_nsents', default=100, type=int)
     parser.add_argument('-min_src_ntokens', default=0, type=int)

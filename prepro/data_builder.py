@@ -17,6 +17,8 @@ from pytorch_pretrained_bert import BertTokenizer
 from utils.logging import logger
 from prepro.utils import _get_word_ngrams
 
+SPLIT_TOKEN = re.compile(r'[。，；]|[!?！？]+')
+
 
 def cal_rouge(evaluated_ngrams, reference_ngrams):
     reference_count = len(reference_ngrams)
@@ -171,6 +173,39 @@ class BertData():
         src_txt = [original_src_txt[i] for i in idxs]
         return src_subtoken_idxs, labels, segments_ids, cls_ids, src_txt, tgt_txt
 
+    def convert_format(self, src):
+        if (len(src) == 0):
+            raise RuntimeError('Input has empty segment.')
+
+        original_src_txt = src
+
+        idxs = [i for i, s in enumerate(src) if (len(s) > self.args.min_src_ntokens)]
+
+        src = [src[i][:self.args.max_src_ntokens] for i in idxs]
+        src = src[:self.args.max_nsents]
+
+        src_txt = [' '.join(sent) for sent in src]
+
+        text = ' [SEP] [CLS] '.join(src_txt)
+        src_subtokens = self.tokenizer.tokenize(text)
+        src_subtokens = src_subtokens[:510]
+        src_subtokens = ['[CLS]'] + src_subtokens + ['[SEP]']
+
+        src_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(src_subtokens)
+        _segs = [-1] + [i for i, t in enumerate(src_subtoken_idxs) if t == self.sep_vid]
+        segs = [_segs[i] - _segs[i - 1] for i in range(1, len(_segs))]
+        segments_ids = []
+        for i, s in enumerate(segs):
+            if (i % 2 == 0):
+                segments_ids += s * [0]
+            else:
+                segments_ids += s * [1]
+        cls_ids = [i for i, t in enumerate(src_subtoken_idxs) if t == self.cls_vid]
+
+        src_txt = [original_src_txt[i] for i in idxs]
+
+        return src_subtoken_idxs, segments_ids, cls_ids, src_txt
+
 
 def format_to_bert(args, result):
     def _white_clean(s):
@@ -244,7 +279,7 @@ def tokenize(args):
         
         # sentences split
         for line in tqdm(lines, desc=f'    [{dataset} tokenizing]'):
-            splits = re.split(token, line)
+            splits = re.split(SPLIT_TOKEN, line)
             result[dataset].append([_white_clean(sent) for sent in splits])
         print(f"    Complete spliting {dataset} set containing {len(lines)} documents.")
 
